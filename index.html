@@ -105,7 +105,7 @@
 </head>
 <body>
     <video autoplay muted loop class="background-video">
-        <source src="bg.mp4" type="video/mp4">
+        <source src="https://www.videvo.net/videvo_files/converted/2016_10/preview/160721A_055_Videvo.mov35543.mp4" type="video/mp4">
         Your browser does not support the video tag.
     </video>
     <div class="overlay"></div>
@@ -220,22 +220,54 @@
         });
 
         function calculateStats() {
-            const numHands = 100;
+            const numHands = 20;
             const handSize = 5;
             const deckList = Object.entries(deck).flatMap(([card, count]) => Array(count).fill(card));
-            const hands = Array.from({ length: numHands }, () => shuffle(deckList).slice(0, handSize));
-            const cardOccurrences = {};
-
-            hands.forEach(hand => {
-                hand.forEach(card => {
-                    cardOccurrences[card] = (cardOccurrences[card] || 0) + 1;
-                });
+            const hands = Array.from({ length: numHands }, () => {
+                return shuffle(deckList).slice(0, handSize);
             });
 
-            return {
-                cardOccurrences: Object.entries(cardOccurrences).sort((a, b) => b[1] - a[1]),
-                hands
-            };
+            const totalTypeCounts = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
+            const flagCounts = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
+            const flagAverages = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
+
+            for (const [card, cardCount] of Object.entries(deck)) {
+                if (cardFlags[card]) {
+                    for (const flag of Object.keys(cardFlags[card])) {
+                        totalTypeCounts[flag] += cardCount;
+                    }
+                }
+            }
+
+            hands.forEach(hand => {
+                const handFlags = new Set();
+                const flagOccurrences = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
+
+                hand.forEach(card => {
+                    if (cardFlags[card]) {
+                        for (const [flag, active] of Object.entries(cardFlags[card])) {
+                            if (active) {
+                                handFlags.add(flag);
+                                flagOccurrences[flag]++;
+                            }
+                        }
+                    }
+                });
+
+                handFlags.forEach(flag => {
+                    flagCounts[flag]++;
+                });
+
+                for (const [flag, count] of Object.entries(flagOccurrences)) {
+                    flagAverages[flag] += count;
+                }
+            });
+
+            for (const flag in flagAverages) {
+                flagAverages[flag] /= numHands;
+            }
+
+            return { flagCounts, flagAverages, totalHands: numHands, totalTypeCounts };
         }
 
         function shuffle(array) {
@@ -246,28 +278,25 @@
             return array;
         }
 
-        function displayStats({ cardOccurrences }) {
+        function displayStats({ flagCounts, flagAverages, totalHands, totalTypeCounts }) {
             const outputDiv = document.getElementById("output");
             outputDiv.style.display = "block";
             outputDiv.innerHTML = `
                 <h3>Deck Analysis</h3>
-                <h4>Most Frequently Drawn Cards:</h4>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Card</th>
-                            <th>Occurrences</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${cardOccurrences.map(([card, count]) => `
-                            <tr>
-                                <td>${card}</td>
-                                <td>${count}</td>
-                            </tr>
-                        `).join("")}
-                    </tbody>
-                </table>
+                <p>Total cards tagged per type:</p>
+                ${Object.entries(totalTypeCounts).map(([flag, count]) => `
+                    <p>${flag}: ${count}</p>
+                `).join("")}
+                <h4>Statistics:</h4>
+                <p><strong>Hands simulated:</strong> ${totalHands}</p>
+                <h5>Probability of drawing at least one card of each type:</h5>
+                ${Object.entries(flagCounts).map(([flag, count]) => `
+                    <p>${flag}: ${(count / totalHands * 100).toFixed(2)}%</p>
+                `).join("")}
+                <h5>Average cards per hand:</h5>
+                ${Object.entries(flagAverages).map(([flag, avg]) => `
+                    <p>${flag}: ${avg.toFixed(2)}</p>
+                `).join("")}
             `;
         }
     </script>
