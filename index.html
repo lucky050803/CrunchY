@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CrunchY - Yu-Gi-Oh! Deck Analyzer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script> <!-- Ajout de Chart.js -->
     <style>
+        /* Style similaire à l'original, pas de modification ici */
         body {
             margin: 0;
             padding: 0;
@@ -12,7 +14,6 @@
             color: #fff;
             background-color: #121212;
         }
-
         .background-video {
             position: fixed;
             top: 0;
@@ -22,7 +23,6 @@
             object-fit: cover;
             z-index: -1;
         }
-
         .overlay {
             background: rgba(0, 0, 0, 0.7);
             position: fixed;
@@ -32,7 +32,6 @@
             height: 100%;
             z-index: 0;
         }
-
         .container {
             position: relative;
             z-index: 1;
@@ -44,12 +43,10 @@
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
             backdrop-filter: blur(10px);
         }
-
         h1 {
             text-align: center;
             color: #fff;
         }
-
         input[type="file"], .btn {
             display: block;
             margin: 20px auto;
@@ -62,31 +59,25 @@
             text-decoration: none;
             width: fit-content;
         }
-
         input[type="file"]:hover, .btn:hover {
             background: #0056b3;
         }
-
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
         }
-
         table th, table td {
             padding: 10px;
             border: 1px solid rgba(255, 255, 255, 0.2);
             text-align: left;
         }
-
         table th {
             background-color: rgba(255, 255, 255, 0.2);
         }
-
         .flags input {
             margin-right: 10px;
         }
-
         .output {
             margin-top: 20px;
             background: rgba(0, 0, 0, 0.6);
@@ -94,18 +85,21 @@
             border-radius: 5px;
             color: #fff;
         }
-
         footer {
             margin-top: 30px;
             text-align: center;
             color: #aaa;
             font-size: 14px;
         }
+        canvas {
+            max-width: 100%;
+            margin-top: 20px;
+        }
     </style>
 </head>
 <body>
     <video autoplay muted loop class="background-video">
-        <source src="https://www.videvo.net/videvo_files/converted/2016_10/preview/160721A_055_Videvo.mov35543.mp4" type="video/mp4">
+        <source src="bg.mp4" type="video/mp4">
         Your browser does not support the video tag.
     </video>
     <div class="overlay"></div>
@@ -115,7 +109,13 @@
         <a href="#" class="btn" id="changeDeck" style="display: none;">Change Deck</a>
         <div id="deckTable"></div>
         <div class="btn" id="generateStats" style="display: none;">Generate Statistics</div>
-        <div class="output" id="output" style="display: none;"></div>
+        <div class="output" id="output" style="display: none;">
+            <h2>Statistics</h2>
+            <!-- Graphiques générés ici -->
+            <canvas id="cardTypeChart"></canvas>
+            <canvas id="flagCountChart"></canvas>
+            <canvas id="flagAvgChart"></canvas>
+        </div>
         <footer>Made by Shadow Wizards</footer>
     </div>
 
@@ -142,20 +142,35 @@
         function parseDeckFile(content) {
             const lines = content.split("\n");
             let mainDeckStarted = false;
+            let totalCards = 0;
+
             lines.forEach(line => {
                 if (line.includes("Main Deck:")) {
                     mainDeckStarted = true;
                     return;
                 }
                 if (line.includes("Extra Deck:") || line.includes("Side Deck:")) {
-                    mainDeckStarted = false; // Ignore extra and side deck
+                    mainDeckStarted = false;
                     return;
                 }
                 if (mainDeckStarted && line.trim() && !line.includes("---")) {
                     const [count, cardName] = line.split("x").map(s => s.trim());
+                    if (!count || !cardName || isNaN(count)) {
+                        console.warn(`Skipping malformed line: ${line}`);
+                        return;
+                    }
                     deck[cardName] = parseInt(count, 10);
+                    totalCards += parseInt(count, 10);
                 }
             });
+
+            if (totalCards < 40) {
+                alert("Error: The deck must contain at least 40 cards.");
+                resetApp();
+                return;
+            }
+
+            console.log(`Deck parsed successfully:`, deck);
             displayDeckTable();
         }
 
@@ -223,81 +238,97 @@
             const numHands = 20;
             const handSize = 5;
             const deckList = Object.entries(deck).flatMap(([card, count]) => Array(count).fill(card));
+            if (deckList.length < handSize) {
+                alert("Error: Deck size is smaller than the hand size.");
+                return {};
+            }
+
             const hands = Array.from({ length: numHands }, () => {
                 return shuffle(deckList).slice(0, handSize);
             });
 
-            const totalTypeCounts = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
-            const flagCounts = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
-            const flagAverages = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
+            const totalTypeCounts = {};
+            const flagCounts = {};
+            const flagAverages = {};
 
-            for (const [card, cardCount] of Object.entries(deck)) {
-                if (cardFlags[card]) {
-                    for (const flag of Object.keys(cardFlags[card])) {
-                        totalTypeCounts[flag] += cardCount;
-                    }
-                }
-            }
+            flags.forEach(flag => {
+                flagCounts[flag] = 0;
+                flagAverages[flag] = 0;
+            });
 
             hands.forEach(hand => {
-                const handFlags = new Set();
-                const flagOccurrences = { Starter: 0, Extender: 0, Brick: 0, "Tech Card": 0, "Hand Trap": 0 };
-
-                hand.forEach(card => {
-                    if (cardFlags[card]) {
-                        for (const [flag, active] of Object.entries(cardFlags[card])) {
-                            if (active) {
-                                handFlags.add(flag);
-                                flagOccurrences[flag]++;
-                            }
-                        }
-                    }
-                });
-
-                handFlags.forEach(flag => {
+                const handFlags = hand.map(card => Object.keys(cardFlags[card] || {}).filter(flag => cardFlags[card][flag]));
+                handFlags.flat().forEach(flag => {
                     flagCounts[flag]++;
                 });
+            });
 
-                for (const [flag, count] of Object.entries(flagOccurrences)) {
-                    flagAverages[flag] += count;
+            flags.forEach(flag => {
+                flagAverages[flag] = (flagCounts[flag] / numHands).toFixed(2);
+            });
+
+            return { totalTypeCounts, flagCounts, flagAverages };
+        }
+
+        function displayStats(stats) {
+            const { flagCounts, flagAverages } = stats;
+            const outputDiv = document.getElementById("output");
+
+            // Graphiques
+            const flagCountData = {
+                labels: flags,
+                datasets: [{
+                    label: 'Flag Count',
+                    data: flags.map(flag => flagCounts[flag] || 0),
+                    backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                }]
+            };
+
+            const flagAvgData = {
+                labels: flags,
+                datasets: [{
+                    label: 'Average per Hand',
+                    data: flags.map(flag => parseFloat(flagAverages[flag] || 0)),
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1
+                }]
+            };
+
+            const ctx1 = document.getElementById('flagCountChart').getContext('2d');
+            new Chart(ctx1, {
+                type: 'bar',
+                data: flagCountData,
+                options: {
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
                 }
             });
 
-            for (const flag in flagAverages) {
-                flagAverages[flag] /= numHands;
-            }
+            const ctx2 = document.getElementById('flagAvgChart').getContext('2d');
+            new Chart(ctx2, {
+                type: 'bar',
+                data: flagAvgData,
+                options: {
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
 
-            return { flagCounts, flagAverages, totalHands: numHands, totalTypeCounts };
+            outputDiv.style.display = "block";
         }
 
         function shuffle(array) {
-            for (let i = array.length - 1; i > 0; i--) {
+            const shuffled = [...array];
+            for (let i = shuffled.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
             }
-            return array;
-        }
-
-        function displayStats({ flagCounts, flagAverages, totalHands, totalTypeCounts }) {
-            const outputDiv = document.getElementById("output");
-            outputDiv.style.display = "block";
-            outputDiv.innerHTML = `
-                <h3>Deck Analysis</h3>
-                <p>Total cards tagged per type:</p>
-                ${Object.entries(totalTypeCounts).map(([flag, count]) => `
-                    <p>${flag}: ${count}</p>
-                `).join("")}
-                <h4>Statistics:</h4>
-                <p><strong>Hands simulated:</strong> ${totalHands}</p>
-                <h5>Probability of drawing at least one card of each type:</h5>
-                ${Object.entries(flagCounts).map(([flag, count]) => `
-                    <p>${flag}: ${(count / totalHands * 100).toFixed(2)}%</p>
-                `).join("")}
-                <h5>Average cards per hand:</h5>
-                ${Object.entries(flagAverages).map(([flag, avg]) => `
-                    <p>${flag}: ${avg.toFixed(2)}</p>
-                `).join("")}
-            `;
+            return shuffled;
         }
     </script>
 </body>
